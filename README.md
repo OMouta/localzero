@@ -1,4 +1,6 @@
-# LocalZero
+# LocalZero [![CI](https://github.com/OMouta/localzero/actions/workflows/ci.yml/badge.svg)](https://github.com/OMouta/localzero/actions/workflows/ci.yml)
+
+![LocalZero](./assets/banner-at-landing-1.png)
 
 LocalZero is an experimental, v0-like app builder for development with local agents. It is very early in development and should be treated as a prototype, not a finished product.
 

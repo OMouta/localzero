@@ -1,4 +1,4 @@
-import { Ollama, type Message, type Tool } from 'ollama'
+import { Ollama, type AbortableAsyncIterator, type ChatRequest, type ChatResponse, type Message, type Tool } from 'ollama'
 import { TOOL_DEFINITIONS, CREATE_PROJECT_TOOL, assessToolCall, executeTool } from '../tools/index.js'
 import type { CommandRisk } from '../sandbox/security.js'
 import { SYSTEM_PROMPT, NEW_PROJECT_SYSTEM_PROMPT, newProjectPromptWithStack } from './prompts.js'
@@ -51,6 +51,7 @@ interface AgentOptions {
   onEvent: (event: AgentEvent) => void
   requestApproval?: (request: { id: string; name: string; input: unknown; reason: string; risk: CommandRisk }) => Promise<boolean>
   onProjectCreated?: (name: string, template: string) => Promise<string> // returns projectDir
+  signal?: AbortSignal
 }
 
 export async function runAgentLoop(
@@ -73,7 +74,12 @@ export async function runAgentLoop(
   const MAX_ITERATIONS = 25
   let supportsThinking = true   // optimistically try; disabled on first failure
 
+  function throwIfAborted() {
+    opts.signal?.throwIfAborted()
+  }
+
   for (let i = 0; i < MAX_ITERATIONS; i++) {
+    throwIfAborted()
     // For new projects, only expose create_project until the directory exists.
     // This prevents small models from calling file tools before the project is set up.
     const tools = isNewProject && !projectDir
@@ -84,17 +90,22 @@ export async function runAgentLoop(
     let toolCalls: Array<{ id: string; function: { name: string; arguments: Record<string, string> } }> = []
 
     const runChat = async (withThinking: boolean) => {
+      throwIfAborted()
       const response = await ollama.chat({
         model,
         messages,
         tools: tools as unknown as Tool[],
         stream: true,
         ...(withThinking ? { think: true } : {}),
-      } as Parameters<typeof ollama.chat>[0])
+      } as unknown as ChatRequest & { stream: true }) as AbortableAsyncIterator<ChatResponse>
 
       let tokenCount = 0
-      for await (const chunk of response) {
-        const thinkingDelta = (chunk.message as Record<string, unknown>).thinking as string | undefined
+      const abortStream = () => response.abort()
+      opts.signal?.addEventListener('abort', abortStream, { once: true })
+      try {
+        for await (const chunk of response) {
+        throwIfAborted()
+        const thinkingDelta = (chunk.message as unknown as Record<string, unknown>).thinking as string | undefined
         if (thinkingDelta) {
           onEvent({ type: 'thinking', delta: thinkingDelta })
         }
@@ -119,6 +130,9 @@ export async function runAgentLoop(
             },
           }))
         }
+        }
+      } finally {
+        opts.signal?.removeEventListener('abort', abortStream)
       }
     }
 
@@ -126,6 +140,7 @@ export async function runAgentLoop(
       console.log(`[agent] ollama.chat iteration=${i + 1} model=${model} messages=${messages.length} tools=${tools.map(t => t.function.name).join(',')}`)
       await runChat(supportsThinking)
     } catch (err) {
+      if (opts.signal?.aborted) throw err
       const msg = err instanceof Error ? err.message : String(err)
       // If the model doesn't support thinking, disable it and retry once
       if (supportsThinking && msg.includes('does not support thinking')) {
@@ -134,6 +149,7 @@ export async function runAgentLoop(
         try {
           await runChat(false)
         } catch (retryErr) {
+          if (opts.signal?.aborted) throw retryErr
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
           console.log(`[agent] ERROR from Ollama: ${retryMsg}`)
           onEvent({ type: 'error', message: retryMsg })
@@ -161,6 +177,7 @@ export async function runAgentLoop(
     }
 
     for (const tc of toolCalls) {
+      throwIfAborted()
       onEvent({ type: 'tool_start', id: tc.id, name: tc.function.name, input: tc.function.arguments })
 
       let output: string
@@ -198,13 +215,15 @@ export async function runAgentLoop(
               reason: assessment.reason,
               risk: assessment.risk,
             })
+            throwIfAborted()
             if (!approved) {
               throw new Error(`Rejected by user: ${assessment.reason}`)
             }
           }
-          output = await executeTool(tc.function.name, tc.function.arguments, projectDir)
+          output = await executeTool(tc.function.name, tc.function.arguments, projectDir, opts.signal)
         }
       } catch (err) {
+        if (opts.signal?.aborted) throw err
         output = `Error: ${err instanceof Error ? err.message : String(err)}`
         isError = true
       }

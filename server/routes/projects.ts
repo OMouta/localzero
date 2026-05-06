@@ -5,6 +5,7 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import { PROJECTS_DIR } from '../index.js'
 import { validateProjectId } from '../sandbox/security.js'
+import { cancelProjectRuns } from '../agentRuns.js'
 
 const execAsync = promisify(exec)
 const router = Router()
@@ -78,14 +79,17 @@ export async function createProjectFromTemplate(
   name: string,
   template: string,
   onLog: (message: string) => void = () => {},
+  signal?: AbortSignal,
 ): Promise<{ meta: ProjectMeta; projectDir: string }> {
   if (!isValidTemplate(template)) throw new Error(`Unknown template: ${template}`)
+  signal?.throwIfAborted()
 
   const id = `${Date.now()}-${projectSlug(name)}`
   const projectDir = path.join(PROJECTS_DIR, id)
   const meta: ProjectMeta = { id, name, template, createdAt: new Date().toISOString(), path: projectDir }
 
   await fs.mkdir(projectDir, { recursive: true })
+  signal?.throwIfAborted()
 
   const templateCmd = TEMPLATES[template]
   if (templateCmd) {
@@ -96,6 +100,7 @@ export async function createProjectFromTemplate(
       shell,
       timeout: 120_000,
       env: { ...process.env, npm_config_yes: 'true', CI: 'true' },
+      signal,
     })
     if (stdout) onLog(`Scaffold stdout: ${stdout.slice(0, 300)}`)
     if (stderr) onLog(`Scaffold stderr: ${stderr.slice(0, 300)}`)
@@ -103,11 +108,13 @@ export async function createProjectFromTemplate(
     const hasPkg = await fs.access(path.join(projectDir, 'package.json')).then(() => true).catch(() => false)
     if (hasPkg) {
       onLog('Running npm install')
-      await execAsync('npm install', { cwd: projectDir, shell, timeout: 120_000, env: { ...process.env, npm_config_yes: 'true', CI: 'true' } })
+      signal?.throwIfAborted()
+      await execAsync('npm install', { cwd: projectDir, shell, timeout: 120_000, env: { ...process.env, npm_config_yes: 'true', CI: 'true' }, signal })
       onLog('npm install done')
     }
   }
 
+  signal?.throwIfAborted()
   await writeProjectMeta(meta)
   return { meta, projectDir }
 }
@@ -168,6 +175,7 @@ async function rmDir(dirPath: string): Promise<void> {
 router.delete('/:id', async (req, res) => {
   try {
     validateProjectId(req.params.id)
+    cancelProjectRuns(req.params.id, 'Project deleted')
     await rmDir(path.join(PROJECTS_DIR, req.params.id))
     await fs.rm(metaPath(req.params.id), { force: true })
     await fs.rm(chatPath(req.params.id), { force: true })

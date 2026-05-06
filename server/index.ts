@@ -17,6 +17,7 @@ import { runAgentLoop, determineStack, type AgentEvent } from './ollama/agent.js
 import { startDevServer, stopDevServer, getDevServer } from './devserver.js'
 import type { Message } from 'ollama'
 import { validateProjectId } from './sandbox/security.js'
+import { registerProjectRun } from './agentRuns.js'
 
 export const PROJECTS_DIR = process.env.PROJECTS_DIR
   ?? path.join(os.homedir(), '.localzero', 'projects')
@@ -162,24 +163,37 @@ wss.on('connection', (ws, req) => {
 
     const { content = '', model = 'llama3.1', history = [], stack } = payload
     log('agent', `Starting - model=${model} isNew=${isNew} stack=${stack ?? 'ai'} projectId=${projectId ?? 'n/a'} historyLen=${history.length}`)
+    const controller = new AbortController()
+    const unregisterRuns = [
+      projectId ? registerProjectRun(projectId, controller) : registerProjectRun(`new:${Date.now()}`, controller),
+    ]
+    const abortOnClose = () => controller.abort('Client disconnected')
+    ws.once('close', abortOnClose)
+
+    function finishRun() {
+      ws.off('close', abortOnClose)
+      for (const unregisterRun of unregisterRuns) unregisterRun()
+    }
 
     if (isNew) {
       const selectedTemplate = stack && isValidTemplate(stack) ? stack : 'vite-react'
       const name = projectNameFromPrompt(content)
       const scaffoldId = `scaffold_${Date.now()}`
-      let createdDir = ''
-      let createdId = ''
+      let createdDir: string
+      let createdId: string
 
       send(ws, { type: 'tool_start', id: scaffoldId, name: 'scaffold_project', input: { name, template: selectedTemplate } })
 
       try {
-        const { meta, projectDir } = await createProjectFromTemplate(name, selectedTemplate, (message) => log('project', message))
+        const { meta, projectDir } = await createProjectFromTemplate(name, selectedTemplate, (message) => log('project', message), controller.signal)
         createdDir = projectDir
         createdId = meta.id
+        unregisterRuns.push(registerProjectRun(createdId, controller))
         send(ws, { type: 'tool_end', id: scaffoldId, output: `Created ${selectedTemplate} project "${name}"` })
         send(ws, { type: 'project_created', id: meta.id, name: meta.name, template: meta.template, description: content })
         send(ws, { type: 'file_tree_refresh' })
       } catch (err) {
+        await finishRun()
         const message = err instanceof Error ? err.message : String(err)
         log('project', `Scaffold error: ${message}`)
         send(ws, { type: 'tool_end', id: scaffoldId, output: `Error: ${message}`, isError: true })
@@ -192,16 +206,26 @@ wss.on('connection', (ws, req) => {
         model,
         history,
         requestApproval,
+        signal: controller.signal,
         onEvent: (event) => forwardAgentEvent(ws, event),
       }).then(async (messages) => {
         log('agent', `Loop finished - ${messages.length} messages`)
+        if (controller.signal.aborted) return
         const targetChatPath = chatPath(createdId)
         await fs.mkdir(path.dirname(targetChatPath), { recursive: true })
         await fs.writeFile(
           targetChatPath,
           JSON.stringify(messages.filter((m) => m.role !== 'system').map(uiChatMessage), null, 2),
         ).catch((e) => log('agent', `Failed to persist chat: ${e}`))
-      })
+      }).catch((err) => {
+        if (controller.signal.aborted) {
+          log('agent', `Cancelled new-project run: ${String(controller.signal.reason ?? err)}`)
+          return
+        }
+        const message = err instanceof Error ? err.message : String(err)
+        log('agent', `ERROR: ${message}`)
+        send(ws, { type: 'error', message })
+      }).finally(finishRun)
 
       return
     }
@@ -214,10 +238,19 @@ wss.on('connection', (ws, req) => {
       model,
       history,
       requestApproval,
+      signal: controller.signal,
       onEvent: (event) => forwardAgentEvent(ws, event),
     }).then((messages) => {
       log('agent', `Loop finished - ${messages.length} messages`)
-    })
+    }).catch((err) => {
+      if (controller.signal.aborted) {
+        log('agent', `Cancelled project run ${projectId}: ${String(controller.signal.reason ?? err)}`)
+        return
+      }
+      const message = err instanceof Error ? err.message : String(err)
+      log('agent', `ERROR: ${message}`)
+      send(ws, { type: 'error', message })
+    }).finally(finishRun)
   })
 })
 

@@ -91,8 +91,13 @@ export function WorkspacePage() {
   function handleProjectCreated(pid: string, name: string) {
     setCreatedProjectId(pid)
     setCreatedProjectName(name)
-    navigate({ to: '/project/$id', params: { id: pid }, replace: true })
+    window.history.replaceState(window.history.state, '', `/project/${pid}`)
   }
+
+  useEffect(() => {
+    if (!isNew || !buildDone || !createdProjectId) return
+    navigate({ to: '/project/$id', params: { id: createdProjectId }, replace: true })
+  }, [isNew, buildDone, createdProjectId, navigate])
 
   const resizeRef = useRef<{ startX: number; startW: number } | null>(null)
 
@@ -140,7 +145,7 @@ export function WorkspacePage() {
     ? (resolvedStack ? (TEMPLATES.find((t) => t.id === resolvedStack)?.label ?? resolvedStack) : null)
     : (existingProject?.template ?? '')
 
-  const chatProjectId = isNew ? (createdProjectId ?? 'new') : id
+  const chatProjectId = isNew ? 'new' : id
   const autoSend = isNew && !pickingStack && resolvedStack
     ? { content: initPrompt, stack: resolvedStack }
     : undefined

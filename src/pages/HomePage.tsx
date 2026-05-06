@@ -60,7 +60,6 @@ export function HomePage() {
         <DotGrid
           className="pointer-events-none absolute inset-0"
           speed={0.7}
-          color={[82, 82, 91]}
         />
 
         <div className="relative w-full max-w-[560px] space-y-8">

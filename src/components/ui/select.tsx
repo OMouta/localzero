@@ -2,9 +2,17 @@ import * as SelectPrimitive from '@radix-ui/react-select'
 import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export const Select = SelectPrimitive.Root
-export const SelectValue = SelectPrimitive.Value
-export const SelectGroup = SelectPrimitive.Group
+export function Select(props: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Root>) {
+  return <SelectPrimitive.Root {...props} />
+}
+
+export function SelectValue(props: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Value>) {
+  return <SelectPrimitive.Value {...props} />
+}
+
+export function SelectGroup(props: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Group>) {
+  return <SelectPrimitive.Group {...props} />
+}
 
 export function SelectTrigger({ className, children, ...props }: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>) {
   return (

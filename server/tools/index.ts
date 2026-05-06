@@ -119,6 +119,7 @@ export async function executeTool(
   name: string,
   args: Record<string, string>,
   projectDir: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const assessment = assessToolCall(name, args)
   if (assessment.action === 'deny') {
@@ -127,7 +128,7 @@ export async function executeTool(
 
   switch (name) {
     case 'bash':
-      return runBash(args.command, projectDir)
+      return runBash(args.command, projectDir, signal)
     case 'patch':
       return applyFilePatch(args.path, args.diff, projectDir)
     case 'read_file':

@@ -5,9 +5,10 @@ import { ensureCommandDirs, safeCommandEnv, validateCommand } from '../sandbox/s
 const execAsync = promisify(exec)
 const TIMEOUT_MS = 60_000
 
-export async function runBash(command: string, projectDir: string): Promise<string> {
+export async function runBash(command: string, projectDir: string, signal?: AbortSignal): Promise<string> {
   validateCommand(command)
   await ensureCommandDirs(projectDir)
+  signal?.throwIfAborted()
 
   try {
     const { stdout, stderr } = await execAsync(command, {
@@ -16,10 +17,12 @@ export async function runBash(command: string, projectDir: string): Promise<stri
       maxBuffer: 1024 * 1024 * 4,
       shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash',
       env: safeCommandEnv(projectDir),
+      signal,
     })
     const out = [stdout, stderr].filter(Boolean).join('\n').trim()
     return out || '(no output)'
   } catch (err: unknown) {
+    if (signal?.aborted) throw err
     const e = err as { stdout?: string; stderr?: string; message?: string; killed?: boolean }
     if (e.killed) return 'Error: command timed out after 60s'
     const out = [e.stdout, e.stderr, e.message].filter(Boolean).join('\n').trim()

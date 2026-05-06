@@ -12,28 +12,31 @@ interface Props {
 
 const SPACING = 28
 const DOT_R = 1
+const DEFAULT_COLOR: [number, number, number] = [82, 82, 91]
 
-export function DotGrid({ className, speed = 1, color = [82, 82, 91], radialFade = true }: Props) {
+export function DotGrid({ className, speed = 1, color = DEFAULT_COLOR, radialFade = true }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')!
+    const ctx = canvas?.getContext('2d')
+    if (!canvas || !ctx) return
+    const canvasEl = canvas
+    const context = ctx
     let raf = 0
     let t = 0
 
     function resize() {
       const pr = window.devicePixelRatio || 1
-      canvas.width = canvas.offsetWidth * pr
-      canvas.height = canvas.offsetHeight * pr
-      ctx.scale(pr, pr)
+      canvasEl.width = canvasEl.offsetWidth * pr
+      canvasEl.height = canvasEl.offsetHeight * pr
+      context.scale(pr, pr)
     }
 
     function draw() {
-      const W = canvas.offsetWidth
-      const H = canvas.offsetHeight
-      ctx.clearRect(0, 0, W, H)
+      const W = canvasEl.offsetWidth
+      const H = canvasEl.offsetHeight
+      context.clearRect(0, 0, W, H)
 
       const cx = W / 2
       const cy = H / 2
@@ -69,10 +72,10 @@ export function DotGrid({ className, speed = 1, color = [82, 82, 91], radialFade
           alpha = Math.max(0, Math.min(1, alpha))
           if (alpha < 0.01) continue
 
-          ctx.beginPath()
-          ctx.arc(x, y, DOT_R, 0, Math.PI * 2)
-          ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`
-          ctx.fill()
+          context.beginPath()
+          context.arc(x, y, DOT_R, 0, Math.PI * 2)
+          context.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`
+          context.fill()
         }
       }
 
@@ -84,7 +87,7 @@ export function DotGrid({ className, speed = 1, color = [82, 82, 91], radialFade
     draw()
 
     const ro = new ResizeObserver(resize)
-    ro.observe(canvas)
+    ro.observe(canvasEl)
 
     return () => {
       cancelAnimationFrame(raf)

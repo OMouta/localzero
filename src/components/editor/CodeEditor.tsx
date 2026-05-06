@@ -63,7 +63,6 @@ export function CodeEditor({ filePath, content }: Props) {
         scrollbar: { verticalScrollbarSize: 4, horizontalScrollbarSize: 4 },
         overviewRulerLanes: 0,
         hideCursorInOverviewRuler: true,
-        renderIndentGuides: true,
         guides: { indentation: true },
       }}
     />
