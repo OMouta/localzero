@@ -39,6 +39,7 @@ export function ChatPanel({
 
   // Load chat history
   useEffect(() => {
+    if (projectId === 'new') return
     if (autoSend) return
     fetch(`/api/projects/${projectId}/files/chat`)
       .then((r) => r.json())

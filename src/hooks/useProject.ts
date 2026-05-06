@@ -77,6 +77,6 @@ export function useChatHistory(projectId: string) {
     queryKey: ['chat', projectId],
     queryFn: () =>
       fetch(`/api/projects/${projectId}/files/chat`).then((r) => r.json()),
-    enabled: !!projectId,
+    enabled: !!projectId && projectId !== 'new',
   })
 }
